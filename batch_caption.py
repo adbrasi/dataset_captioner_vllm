@@ -35,12 +35,12 @@ from PIL import Image, ImageOps
 
 BACKENDS: dict[str, dict] = {
     "gemma": {
-        "base_url": "https://adbrasi--gemma4-abliterated-serve.modal.run/v1",
+        "base_url": "https://adolfocesarone--gemma4-abliterated-serve.modal.run/v1",
         "model": "gemma4-abliterated",
         "supports_thinking": True,
     },
     "qwen": {
-        "base_url": "https://adbrasi--qwen36-abliterated-serve.modal.run/v1",
+        "base_url": "https://adolfocesarone--qwen36-abliterated-serve.modal.run/v1",
         "model": "qwen36-abliterated",
         "supports_thinking": True,
     },
