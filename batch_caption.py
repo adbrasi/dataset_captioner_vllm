@@ -36,7 +36,7 @@ BACKENDS: dict[str, dict] = {
     "gemma": {
         "base_url": "https://adbrasi--gemma4-abliterated-serve.modal.run/v1",
         "model": "gemma4-abliterated",
-        "supports_thinking": False,
+        "supports_thinking": True,
     },
     "qwen": {
         "base_url": "https://adbrasi--qwen36-abliterated-serve.modal.run/v1",

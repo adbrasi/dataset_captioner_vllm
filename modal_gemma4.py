@@ -70,6 +70,7 @@ def serve():
         "--limit-mm-per-prompt",
         f"'{json.dumps({'image': 4, 'video': 1, 'audio': 0})}'",
         "--mm-processor-kwargs", '\'{"max_soft_tokens": 1120}\'',
+        "--reasoning-parser", "gemma4",
         "--async-scheduling",
     ]
     subprocess.Popen(" ".join(cmd), shell=True)
