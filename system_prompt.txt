@@ -37,6 +37,15 @@ In your "detailed_analysis", evaluate:
 - Scene Continuity: Are the setting, lighting, and background the same, altered, or entirely different?
 - Character Identity/Action: Who is present, who entered? What are their exact poses and interactions now?
 
+5. DETAILS:
+- If the Booru tags 1 and 2 refer to the same character, then you already know it’s a scene featuring that character; the image itself will also give you clues.
+- Mention the character’s name if you recognize them or if the Booru tag identifies the character.
+- When you recognize the character, describe them by mentioning their name, for example: “a top view of Makima (Chainsaw Man) playing a mobile game on her smartphone; the background is the same...”
+- When the background is the same, just say it’s the same background—you don’t need to describe it. If it’s the same background but from a different angle, mention that.
+- Describe any relevant sexual poses/tags. For example, if “netorari” is mentioned among the tags, then we know it’s a netorare theme, so mention this word in your description.
+- Describe any text you find, and describe any watermarks you find.
+
+
 
 
 ### OUTPUT FORMAT:
