@@ -182,23 +182,41 @@ def atomic_write(path: Path, content: str) -> None:
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def extract_short_prompt(raw: str) -> str:
+def extract_short_prompt(raw: str | None, reasoning: str | None = None) -> str:
     """Parseia o JSON da resposta e devolve short_prompt.
 
-    Tolera ```json ... ``` mesmo o system prompt pedindo JSON puro.
+    Tolera:
+      - response_format estrito (JSON puro)
+      - markdown ```json ... ``` (system prompt pede JSON puro mas modelo às vezes embrulha)
+      - content=None (Qwen com thinking ON pode retornar tudo no reasoning_content)
+      - JSON com short_prompt: null (raise ValueError → trigger retry)
     """
-    text = raw.strip()
-    try:
-        return json.loads(text)["short_prompt"]
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass
-    m = _JSON_BLOCK_RE.search(text)
-    if m:
+    candidates: list[str] = []
+    for src in (raw, reasoning):
+        if src and src.strip():
+            candidates.append(src.strip())
+    if not candidates:
+        raise ValueError("resposta vazia (content e reasoning ambos None/empty)")
+
+    for text in candidates:
         try:
-            return json.loads(m.group(0))["short_prompt"]
-        except (json.JSONDecodeError, KeyError, TypeError):
+            data = json.loads(text)
+            sp = data.get("short_prompt")
+            if sp:
+                return sp
+        except (json.JSONDecodeError, AttributeError):
             pass
-    raise ValueError(f"short_prompt não encontrado em: {text[:300]}...")
+        m = _JSON_BLOCK_RE.search(text)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                sp = data.get("short_prompt")
+                if sp:
+                    return sp
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    snippet = candidates[0][:300]
+    raise ValueError(f"short_prompt não encontrado / null em: {snippet}...")
 
 
 def build_messages(system_prompt: str, pair: Pair, tags_a: str, tags_b: str) -> list[dict]:
@@ -236,7 +254,11 @@ def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair,
                 timeout=REQUEST_TIMEOUT,
                 extra_body=extra_body or {},
             )
-            short_prompt = extract_short_prompt(resp.choices[0].message.content)
+            msg = resp.choices[0].message
+            short_prompt = extract_short_prompt(
+                msg.content,
+                getattr(msg, "reasoning_content", None),
+            )
             return {
                 "short_prompt": short_prompt,
                 "latency": time.time() - t0,
@@ -259,8 +281,9 @@ def main() -> int:
     ap.add_argument("folder", type=Path, help="pasta com imagens _A e _B")
     ap.add_argument("--backend", choices=list(BACKENDS), required=True,
                     help="qual modelo usar (gemma | qwen)")
-    ap.add_argument("--concurrency", type=int, default=64,
-                    help="threads simultâneas no cliente (default 64 = 2 GPUs × max_inputs 32)")
+    ap.add_argument("--concurrency", type=int, default=256,
+                    help="threads simultâneas no cliente (default 256 = 8 GPUs × max_inputs 32). "
+                         "Server tem max_containers=16 — pode ir até 512 se quiser fritar tudo.")
     ap.add_argument("--max-pairs", type=int, default=None, help="limite p/ teste")
     ap.add_argument("--processed-log", type=Path, default=None,
                     help="caminho do log de progresso (default: <folder>/.processed-<backend>.jsonl)")
