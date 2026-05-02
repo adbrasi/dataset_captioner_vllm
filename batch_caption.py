@@ -21,6 +21,7 @@ import base64
 import io
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -29,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 
-from openai import OpenAI
+from openai import OpenAI, BadRequestError
 from PIL import Image, ImageOps
 
 BACKENDS: dict[str, dict] = {
@@ -115,6 +116,8 @@ def append_processed(log_path: Path, key: str, lock: Lock) -> None:
     with lock:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def img_part(path: Path) -> dict:
@@ -207,6 +210,10 @@ def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair, extr
                 "latency": time.time() - t0,
                 "completion_tokens": resp.usage.completion_tokens,
             }
+        except BadRequestError as exc:
+            # 4xx do servidor — payload inválido, imagem corrompida, etc.
+            # Retry não vai resolver; falha imediata.
+            raise RuntimeError(f"BadRequest no par {pair.key}: {exc}") from exc
         except Exception as exc:
             last_err = exc
             wait = 2 ** attempt
@@ -220,7 +227,8 @@ def main() -> int:
     ap.add_argument("folder", type=Path, help="pasta com imagens _A e _B")
     ap.add_argument("--backend", choices=list(BACKENDS), required=True,
                     help="qual modelo usar (gemma | qwen)")
-    ap.add_argument("--concurrency", type=int, default=96)
+    ap.add_argument("--concurrency", type=int, default=64,
+                    help="threads simultâneas no cliente (default 64 = 2 GPUs × max_inputs 32)")
     ap.add_argument("--max-pairs", type=int, default=None, help="limite p/ teste")
     ap.add_argument("--processed-log", type=Path, default=None,
                     help="caminho do log de progresso (default: <folder>/.processed-<backend>.jsonl)")
@@ -275,8 +283,12 @@ def main() -> int:
     def worker(pair: Pair) -> tuple[Pair, str | None, str | None, dict | None]:
         try:
             r = caption_one(client, cfg["model"], system_prompt, pair, extra_body)
-            atomic_write(pair.txt_b, r["short_prompt"])
+            # Ordem crítica: registrar PRIMEIRO, sobrescrever DEPOIS.
+            # Garante que num crash mid-par jamais lemos o short_prompt
+            # como se fosse booru tag em rodada subsequente. O pior caso
+            # vira "silent miss" (par registrado mas sem write) — recuperável.
             append_processed(processed_log, pair.key, write_lock)
+            atomic_write(pair.txt_b, r["short_prompt"])
             return pair, None, r["short_prompt"], r
         except Exception as exc:
             return pair, str(exc), None, None

@@ -48,16 +48,17 @@ def download_model():
 @app.function(
     image=vllm_image,
     gpu="H200",
-    scaledown_window=10 * MINUTES,
-    timeout=10 * MINUTES,
+    scaledown_window=15 * MINUTES,
+    timeout=120 * MINUTES,
     volumes={
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/vllm": vllm_cache,
     },
     max_containers=8,
+    buffer_containers=1,
 )
 @modal.concurrent(max_inputs=32, target_inputs=24)
-@modal.web_server(port=VLLM_PORT, startup_timeout=15 * MINUTES)
+@modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
 def serve():
     import subprocess
 
@@ -70,12 +71,10 @@ def serve():
         "--gpu-memory-utilization", "0.92",
         "--max-num-seqs", "64",
         "--kv-cache-dtype", "fp8",
-        "--limit-mm-per-prompt",
-        f"'{json.dumps({'image': 2, 'video': 0, 'audio': 0})}'",
+        "--limit-mm-per-prompt", json.dumps({"image": 2, "video": 0, "audio": 0}),
         "--mm-processor-kwargs",
-        '\'{"images_kwargs":{"size":{"longest_edge":1280,"shortest_edge":280}}}\'',
+        json.dumps({"images_kwargs": {"size": {"longest_edge": 1280, "shortest_edge": 280}}}),
         "--reasoning-parser", "qwen3",
-        "--tool-call-parser", "qwen3",
         "--async-scheduling",
     ]
-    subprocess.Popen(" ".join(cmd), shell=True)
+    subprocess.Popen(cmd)

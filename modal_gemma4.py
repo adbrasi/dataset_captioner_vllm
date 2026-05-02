@@ -45,16 +45,17 @@ def download_model():
     image=vllm_image,
     gpu="H200",
     scaledown_window=15 * MINUTES,
-    timeout=10 * MINUTES,
+    timeout=120 * MINUTES,
     volumes={
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/vllm": vllm_cache,
     },
     max_containers=8,
-    # min_containers=2,  # descomente pra deixar 2 GPUs sempre warm
+    buffer_containers=1,  # 1 GPU extra warm durante tráfego ativo (zera cold start em pico)
+    # min_containers=2,   # descomente pra deixar 2 GPUs sempre warm (paga mesmo idle)
 )
 @modal.concurrent(max_inputs=32, target_inputs=24)
-@modal.web_server(port=VLLM_PORT, startup_timeout=15 * MINUTES)
+@modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
 def serve():
     import subprocess
 
@@ -67,10 +68,9 @@ def serve():
         "--gpu-memory-utilization", "0.95",
         "--max-num-seqs", "64",
         "--kv-cache-dtype", "fp8",
-        "--limit-mm-per-prompt",
-        f"'{json.dumps({'image': 4, 'video': 1, 'audio': 0})}'",
-        "--mm-processor-kwargs", '\'{"max_soft_tokens": 1120}\'',
+        "--limit-mm-per-prompt", json.dumps({"image": 4, "video": 1, "audio": 0}),
+        "--mm-processor-kwargs", json.dumps({"max_soft_tokens": 1120}),
         "--reasoning-parser", "gemma4",
         "--async-scheduling",
     ]
-    subprocess.Popen(" ".join(cmd), shell=True)
+    subprocess.Popen(cmd)
