@@ -1,15 +1,19 @@
-"""Serve huihui-ai/Huihui-gemma-4-31B-it-abliterated via vLLM on Modal (1x H200).
+"""Serve huihui-ai/Huihui-Qwen3.6-27B-abliterated via vLLM on Modal (1× H200).
 
-    modal run modal_gemma4.py::download_model    # uma vez, ~5min
-    modal deploy modal_gemma4.py                 # publica em URL pública
+Workload alvo: pair captioning de imagens (2 imagens + booru tags + system prompt → JSON).
+Qwen 3.6 tem reasoning ativado por padrão — o cliente pode desligar via
+`extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
+
+    modal run modal_qwen36.py::download_model
+    modal deploy modal_qwen36.py
 """
 
 import json
 
 import modal
 
-MODEL_NAME = "huihui-ai/Huihui-gemma-4-31B-it-abliterated-v2"
-SERVED_NAME = "gemma4-abliterated"
+MODEL_NAME = "huihui-ai/Huihui-Qwen3.6-27B-abliterated"
+SERVED_NAME = "qwen36-abliterated"
 
 vllm_image = (
     modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_python="3.12")
@@ -17,13 +21,13 @@ vllm_image = (
     .uv_pip_install("vllm==0.19.0")
     .uv_pip_install("transformers==5.5.0")
     .uv_pip_install("huggingface_hub[hf_xet,hf_transfer]")
-    .env({"HF_XET_HIGH_PERFORMANCE": "1"})
+    .env({"HF_XET_HIGH_PERFORMANCE": "1", "OMP_NUM_THREADS": "1"})
 )
 
 hf_cache = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
-vllm_cache = modal.Volume.from_name("vllm-cache", create_if_missing=True)
+vllm_cache = modal.Volume.from_name("vllm-cache-qwen36", create_if_missing=True)
 
-app = modal.App("gemma4-abliterated")
+app = modal.App("qwen36-abliterated")
 
 MINUTES = 60
 VLLM_PORT = 8000
@@ -44,14 +48,13 @@ def download_model():
 @app.function(
     image=vllm_image,
     gpu="H200",
-    scaledown_window=15 * MINUTES,
+    scaledown_window=10 * MINUTES,
     timeout=10 * MINUTES,
     volumes={
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/vllm": vllm_cache,
     },
     max_containers=8,
-    # min_containers=2,  # descomente pra deixar 2 GPUs sempre warm
 )
 @modal.concurrent(max_inputs=32, target_inputs=24)
 @modal.web_server(port=VLLM_PORT, startup_timeout=15 * MINUTES)
@@ -63,13 +66,16 @@ def serve():
         "--served-model-name", MODEL_NAME, SERVED_NAME, "llm",
         "--host", "0.0.0.0",
         "--port", str(VLLM_PORT),
-        "--max-model-len", "32768",
-        "--gpu-memory-utilization", "0.95",
+        "--max-model-len", "65536",
+        "--gpu-memory-utilization", "0.92",
         "--max-num-seqs", "64",
         "--kv-cache-dtype", "fp8",
         "--limit-mm-per-prompt",
-        f"'{json.dumps({'image': 4, 'video': 1, 'audio': 0})}'",
-        "--mm-processor-kwargs", '\'{"max_soft_tokens": 1120}\'',
+        f"'{json.dumps({'image': 2, 'video': 0, 'audio': 0})}'",
+        "--mm-processor-kwargs",
+        '\'{"images_kwargs":{"size":{"longest_edge":1280,"shortest_edge":280}}}\'',
+        "--reasoning-parser", "qwen3",
+        "--tool-call-parser", "qwen3",
         "--async-scheduling",
     ]
     subprocess.Popen(" ".join(cmd), shell=True)

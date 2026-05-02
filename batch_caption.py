@@ -1,4 +1,4 @@
-"""Batch captioning de pares (_A, _B) numa pasta.
+"""Batch captioning de pares (_A, _B) numa pasta. Multi-backend (Gemma 4 ou Qwen 3.6).
 
 Para cada par <prefix>_image_NNNN_A.<ext> + <prefix>_image_NNNN_B.<ext>:
   - lê booru tags de <name>_A.txt e <name>_B.txt
@@ -6,12 +6,14 @@ Para cada par <prefix>_image_NNNN_A.<ext> + <prefix>_image_NNNN_B.<ext>:
   - parseia JSON da resposta, extrai "short_prompt"
   - sobrescreve <name>_B.txt com o short_prompt
 
-Idempotente: registra cada par concluído em .processed.jsonl (no diretório de output);
-re-rodar pula o que já foi feito. Atomic-write previne arquivos truncados em caso de crash.
+Idempotente: registra cada par concluído em .processed-<backend>.jsonl. Logs de processed
+SÃO POR BACKEND — re-rodar com outro backend reprocessa tudo (intencional).
 
 Uso:
-    .venv/bin/python batch_caption.py /caminho/da/pasta
-    .venv/bin/python batch_caption.py /caminho/da/pasta --concurrency 96 --max-pairs 200
+    .venv/bin/python batch_caption.py /caminho/da/pasta --backend gemma
+    .venv/bin/python batch_caption.py /caminho/da/pasta --backend qwen
+    .venv/bin/python batch_caption.py /caminho/da/pasta --backend qwen --no-thinking
+    .venv/bin/python batch_caption.py /caminho/da/pasta --backend gemma --max-pairs 10
 """
 
 import argparse
@@ -30,8 +32,19 @@ from threading import Lock
 from openai import OpenAI
 from PIL import Image, ImageOps
 
-BASE_URL = "https://adbrasi--gemma4-abliterated-serve.modal.run/v1"
-MODEL = "gemma4-abliterated"
+BACKENDS: dict[str, dict] = {
+    "gemma": {
+        "base_url": "https://adbrasi--gemma4-abliterated-serve.modal.run/v1",
+        "model": "gemma4-abliterated",
+        "supports_thinking": False,
+    },
+    "qwen": {
+        "base_url": "https://adbrasi--qwen36-abliterated-serve.modal.run/v1",
+        "model": "qwen36-abliterated",
+        "supports_thinking": True,
+    },
+}
+
 SYSTEM_PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_RETRIES = 3
@@ -170,7 +183,7 @@ def build_messages(system_prompt: str, pair: Pair, tags_a: str, tags_b: str) -> 
     ]
 
 
-def caption_one(client: OpenAI, system_prompt: str, pair: Pair) -> dict:
+def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair, extra_body: dict | None) -> dict:
     tags_a = read_tags(pair.txt_a)
     tags_b = read_tags(pair.txt_b)
     messages = build_messages(system_prompt, pair, tags_a, tags_b)
@@ -180,12 +193,13 @@ def caption_one(client: OpenAI, system_prompt: str, pair: Pair) -> dict:
         try:
             t0 = time.time()
             resp = client.chat.completions.create(
-                model=MODEL,
+                model=model,
                 messages=messages,
                 max_tokens=1500,
                 temperature=0.4,
                 response_format={"type": "json_object"},
                 timeout=REQUEST_TIMEOUT,
+                extra_body=extra_body or {},
             )
             short_prompt = extract_short_prompt(resp.choices[0].message.content)
             return {
@@ -204,21 +218,39 @@ def caption_one(client: OpenAI, system_prompt: str, pair: Pair) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", type=Path, help="pasta com imagens _A e _B")
+    ap.add_argument("--backend", choices=list(BACKENDS), required=True,
+                    help="qual modelo usar (gemma | qwen)")
     ap.add_argument("--concurrency", type=int, default=96)
     ap.add_argument("--max-pairs", type=int, default=None, help="limite p/ teste")
     ap.add_argument("--processed-log", type=Path, default=None,
-                    help="caminho do log de progresso (default: <folder>/.processed.jsonl)")
+                    help="caminho do log de progresso (default: <folder>/.processed-<backend>.jsonl)")
+    ap.add_argument("--no-thinking", action="store_true",
+                    help="desativa thinking no Qwen (default ON; ignorado no Gemma)")
     args = ap.parse_args()
 
     if not args.folder.is_dir():
         log.error("não é uma pasta: %s", args.folder)
         return 1
 
+    cfg = BACKENDS[args.backend]
+    log.info("backend=%s  model=%s  url=%s", args.backend, cfg["model"], cfg["base_url"])
+
+    extra_body: dict = {}
+    if cfg["supports_thinking"]:
+        thinking = not args.no_thinking
+        if not thinking:
+            log.warning(
+                "thinking=False + response_format=json_object pode quebrar (vLLM #18819). "
+                "Mantendo response_format mesmo assim — se quebrar, retire --no-thinking."
+            )
+        extra_body["chat_template_kwargs"] = {"enable_thinking": thinking}
+        log.info("thinking=%s", thinking)
+
     log.info("descobrindo pares em %s", args.folder)
     pairs = discover_pairs(args.folder)
     log.info("encontrados %d pares", len(pairs))
 
-    processed_log = args.processed_log or (args.folder / ".processed.jsonl")
+    processed_log = args.processed_log or (args.folder / f".processed-{args.backend}.jsonl")
     done_keys = load_processed(processed_log)
     pending = [p for p in pairs if p.key not in done_keys]
     log.info("já processados: %d  |  pendentes: %d", len(done_keys), len(pending))
@@ -232,7 +264,7 @@ def main() -> int:
         return 0
 
     system_prompt = SYSTEM_PROMPT_FILE.read_text(encoding="utf-8")
-    client = OpenAI(base_url=BASE_URL, api_key="not-needed", max_retries=0)
+    client = OpenAI(base_url=cfg["base_url"], api_key="not-needed", max_retries=0)
     write_lock = Lock()
 
     ok = 0
@@ -242,7 +274,7 @@ def main() -> int:
 
     def worker(pair: Pair) -> tuple[Pair, str | None, str | None, dict | None]:
         try:
-            r = caption_one(client, system_prompt, pair)
+            r = caption_one(client, cfg["model"], system_prompt, pair, extra_body)
             atomic_write(pair.txt_b, r["short_prompt"])
             append_processed(processed_log, pair.key, write_lock)
             return pair, None, r["short_prompt"], r
