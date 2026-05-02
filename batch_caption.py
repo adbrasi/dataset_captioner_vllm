@@ -40,7 +40,7 @@ BACKENDS: dict[str, dict] = {
         "supports_thinking": True,
     },
     "qwen": {
-        "base_url": "https://adolfocesarone--qwen36-abliterated-serve.modal.run/v1",
+        "base_url": "https://adolfocesarmir4--qwen36-abliterated-serve.modal.run/v1",
         "model": "qwen36-abliterated",
         "supports_thinking": True,
     },
@@ -111,8 +111,13 @@ def load_processed(log_path: Path) -> set[str]:
     return keys
 
 
-def append_processed(log_path: Path, key: str, lock: Lock) -> None:
-    line = json.dumps({"key": key, "ts": time.time()}, ensure_ascii=False) + "\n"
+def append_processed(log_path: Path, key: str, lock: Lock, failed: bool = False) -> None:
+    """Registra par no log. Se failed=True, marca como permanentemente falho —
+    esse par NÃO vai ser retentado em rodadas futuras (será pulado igual aos ok)."""
+    entry: dict = {"key": key, "ts": time.time()}
+    if failed:
+        entry["failed"] = True
+    line = json.dumps(entry, ensure_ascii=False) + "\n"
     with lock:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line)
@@ -248,7 +253,7 @@ def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair,
             resp = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                max_tokens=6000,  # thinking + JSON com folga, sem truncar
+                max_tokens=10000,  # thinking pesado + JSON; pares dificeis precisam disso
                 temperature=0.4,
                 response_format={"type": "json_object"},
                 timeout=REQUEST_TIMEOUT,
@@ -351,6 +356,9 @@ def main() -> int:
             atomic_write(pair.txt_b, r["short_prompt"])
             return pair, None, r["short_prompt"], r
         except Exception as exc:
+            # Esgotou todos os retries: marca como failed permanente
+            # pra não retentar em rodadas futuras (libera a fila pra próximo).
+            append_processed(processed_log, pair.key, write_lock, failed=True)
             return pair, str(exc), None, None
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
