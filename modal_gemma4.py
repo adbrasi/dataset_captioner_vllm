@@ -44,14 +44,13 @@ def download_model():
 @app.function(
     image=vllm_image,
     gpu="H200",
-    scaledown_window=15 * MINUTES,
+    scaledown_window=2 * MINUTES,  # 2min = não desperdiça idle entre testes
     timeout=120 * MINUTES,
     volumes={
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/vllm": vllm_cache,
     },
     max_containers=8,
-    buffer_containers=1,  # 1 GPU extra warm durante tráfego ativo (zera cold start em pico)
     # min_containers=2,   # descomente pra deixar 2 GPUs sempre warm (paga mesmo idle)
 )
 @modal.concurrent(max_inputs=32, target_inputs=24)
