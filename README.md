@@ -92,6 +92,36 @@ batch_caption.py /pasta --backend gemma
 batch_caption.py /pasta --backend qwen --processed-log /tmp/run1.jsonl
 ```
 
+## Roteiro recomendado pra dataset grande (≥1000 pares)
+
+```bash
+# 1. checagem prévia: contar pares e .txt faltantes
+.venv/bin/python3 -c "
+from pathlib import Path
+folder = Path('/caminho/do/dataset')
+a = sorted(folder.glob('*_A.jpg'))
+b = sorted(folder.glob('*_B.jpg'))
+print(f'pares: {len(a)}A + {len(b)}B')
+for img in a + b:
+    if not img.with_suffix('.txt').exists():
+        print(f'  falta .txt: {img.name}')
+"
+
+# 2. validação em 50 pares (~3min, ~$0.30) — confirma qualidade do output
+.venv/bin/python3 batch_caption.py /caminho/do/dataset \
+  --backend qwen --concurrency 128 --max-pairs 50
+
+# inspeciona alguns _B.txt manualmente
+head -3 /caminho/do/dataset/*_B.txt | head -20
+
+# 3. produção full — pula automaticamente os 50 já feitos
+.venv/bin/python3 batch_caption.py /caminho/do/dataset \
+  --backend qwen --concurrency 128
+```
+
+**Não precisa chunkar manualmente** — a idempotência (`.processed-qwen.jsonl`) já cobre
+crash, Ctrl+C, internet caindo, créditos acabando. Roda o mesmo comando de novo e retoma.
+
 ## Saída
 
 Pra cada par processado:
