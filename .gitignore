@@ -7,12 +7,23 @@ node_modules/
 dist/
 build/
 .vscode/
+
+# media de teste
 *.jpg
 *.jpeg
 *.png
+*.webp
 *.mp4
 *.mov
-*.webm
 *.mkv
+*.webm
 *Zone.Identifier
-.processed.jsonl
+
+# arquivos de controle do batch (gerados na pasta do dataset)
+.booru-cache.json
+.processed-*.jsonl
+
+# captions geradas pelos scripts de teste (NÃO commitar — podem conter NSFW)
+3258f4aa544dc55b245c0f692d101fba.txt
+video_seeda.txt
+compare_ab_v*.json
