@@ -281,9 +281,9 @@ def main() -> int:
     ap.add_argument("folder", type=Path, help="pasta com imagens _A e _B")
     ap.add_argument("--backend", choices=list(BACKENDS), required=True,
                     help="qual modelo usar (gemma | qwen)")
-    ap.add_argument("--concurrency", type=int, default=256,
-                    help="threads simultâneas no cliente (default 256 = 8 GPUs × max_inputs 32). "
-                         "Server tem max_containers=16 — pode ir até 512 se quiser fritar tudo.")
+    ap.add_argument("--concurrency", type=int, default=320,
+                    help="threads simultâneas no cliente (default 320 = 10 GPUs × max_inputs 32). "
+                         "Server tem max_containers=10 (limite da conta).")
     ap.add_argument("--max-pairs", type=int, default=None, help="limite p/ teste")
     ap.add_argument("--processed-log", type=Path, default=None,
                     help="caminho do log de progresso (default: <folder>/.processed-<backend>.jsonl)")

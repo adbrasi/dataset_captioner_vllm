@@ -54,7 +54,7 @@ def download_model():
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/vllm": vllm_cache,
     },
-    max_containers=16,    # teto de paralelismo: até 16 H200 simultâneas
+    max_containers=10,    # respeita teto de 10 GPUs simultâneas da conta
 )
 @modal.concurrent(max_inputs=32, target_inputs=20)  # target=20 -> autoscale mais agressivo
 @modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
