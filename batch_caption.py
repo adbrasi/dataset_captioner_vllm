@@ -140,6 +140,39 @@ def read_tags(p: Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace").strip()
 
 
+def load_booru_cache(folder: Path) -> dict[str, dict[str, str]]:
+    """Carrega cache imutável de booru tags por par.
+
+    Razão: depois que o script roda, _B.txt vira short_prompt. Se alguém roda
+    de novo (outro backend, ou após corromper), as tags originais teriam sido
+    perdidas. Esse cache snapshota uma vez e nunca mais lê os .txt.
+    """
+    f = folder / ".booru-cache.json"
+    if f.exists():
+        return json.loads(f.read_text(encoding="utf-8"))
+    return {}
+
+
+def save_booru_cache(folder: Path, cache: dict[str, dict[str, str]]) -> None:
+    f = folder / ".booru-cache.json"
+    tmp = f.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(f)
+
+
+def populate_booru_cache(folder: Path, pairs: list, cache: dict[str, dict[str, str]]) -> None:
+    """Lê .txt originais pra qualquer par ainda não cacheado e persiste."""
+    new = 0
+    for p in pairs:
+        if p.key in cache:
+            continue
+        cache[p.key] = {"a": read_tags(p.txt_a), "b": read_tags(p.txt_b)}
+        new += 1
+    if new:
+        save_booru_cache(folder, cache)
+        log.info("booru cache: +%d pares snapshotados (total %d)", new, len(cache))
+
+
 def atomic_write(path: Path, content: str) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content, encoding="utf-8")
@@ -186,9 +219,8 @@ def build_messages(system_prompt: str, pair: Pair, tags_a: str, tags_b: str) -> 
     ]
 
 
-def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair, extra_body: dict | None) -> dict:
-    tags_a = read_tags(pair.txt_a)
-    tags_b = read_tags(pair.txt_b)
+def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair,
+                tags_a: str, tags_b: str, extra_body: dict | None) -> dict:
     messages = build_messages(system_prompt, pair, tags_a, tags_b)
 
     last_err = None
@@ -198,7 +230,7 @@ def caption_one(client: OpenAI, model: str, system_prompt: str, pair: Pair, extr
             resp = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                max_tokens=1500,
+                max_tokens=6000,  # thinking + JSON com folga, sem truncar
                 temperature=0.4,
                 response_format={"type": "json_object"},
                 timeout=REQUEST_TIMEOUT,
@@ -258,6 +290,9 @@ def main() -> int:
     pairs = discover_pairs(args.folder)
     log.info("encontrados %d pares", len(pairs))
 
+    booru_cache = load_booru_cache(args.folder)
+    populate_booru_cache(args.folder, pairs, booru_cache)
+
     processed_log = args.processed_log or (args.folder / f".processed-{args.backend}.jsonl")
     done_keys = load_processed(processed_log)
     pending = [p for p in pairs if p.key not in done_keys]
@@ -282,7 +317,9 @@ def main() -> int:
 
     def worker(pair: Pair) -> tuple[Pair, str | None, str | None, dict | None]:
         try:
-            r = caption_one(client, cfg["model"], system_prompt, pair, extra_body)
+            tags = booru_cache[pair.key]
+            r = caption_one(client, cfg["model"], system_prompt, pair,
+                            tags["a"], tags["b"], extra_body)
             # Ordem crítica: registrar PRIMEIRO, sobrescrever DEPOIS.
             # Garante que num crash mid-par jamais lemos o short_prompt
             # como se fosse booru tag em rodada subsequente. O pior caso
