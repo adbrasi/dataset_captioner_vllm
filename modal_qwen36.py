@@ -74,6 +74,7 @@ def serve():
         "--mm-processor-kwargs",
         json.dumps({"images_kwargs": {"size": {"longest_edge": 1280, "shortest_edge": 280}}}),
         "--reasoning-parser", "qwen3",
+        "--enable-prefix-caching",  # cacheia system prompt (~1900 tok) entre requests
         "--async-scheduling",
     ]
     subprocess.Popen(cmd)
