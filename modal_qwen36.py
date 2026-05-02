@@ -57,7 +57,7 @@ def download_model():
     max_containers=10,    # respeita teto de 10 GPUs simultâneas da conta
 )
 @modal.concurrent(max_inputs=32, target_inputs=20)  # target=20 -> autoscale mais agressivo
-@modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
+@modal.web_server(port=VLLM_PORT, startup_timeout=15 * MINUTES)
 def serve():
     import subprocess
 
