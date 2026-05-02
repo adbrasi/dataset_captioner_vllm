@@ -12,7 +12,7 @@ import json
 
 import modal
 
-MODEL_NAME = "huihui-ai/Huihui-Qwen3.6-27B-abliterated"
+MODEL_NAME = "edp1096/Huihui-Qwen3.6-27B-abliterated-FP8"
 SERVED_NAME = "qwen36-abliterated"
 
 vllm_image = (
@@ -69,6 +69,7 @@ def serve():
         "--max-model-len", "65536",
         "--gpu-memory-utilization", "0.92",
         "--max-num-seqs", "64",
+        "--quantization", "fp8",     # checkpoint pré-quantizado FP8
         "--kv-cache-dtype", "fp8",
         "--limit-mm-per-prompt", json.dumps({"image": 2, "video": 0, "audio": 0}),
         "--mm-processor-kwargs",
